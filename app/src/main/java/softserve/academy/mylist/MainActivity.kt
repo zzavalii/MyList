@@ -8,14 +8,17 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -60,7 +63,7 @@ class MainActivity : ComponentActivity() {
             MyListTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     Surface(modifier = Modifier.padding(innerPadding)) {
-                        Text("Hello Android")
+                        ShoppingListScreen()
                     }
                 }
             }
@@ -79,7 +82,7 @@ data class ShoppingItem(
 // ORM
 @Dao
 interface ShoppingDao {
-    @Query("SELECT * FROM shopping_items")
+    @Query("SELECT * FROM shopping_items ORDER BY id DESC")
     fun getAllItems(): List<ShoppingItem>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -132,24 +135,13 @@ class ShoppingListViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
-//    val shoppingList = mutableStateListOf(
-//        ShoppingItem("Молоко"),
-//        ShoppingItem("Хліб"),
-//        ShoppingItem("Яйця"),
-//        ShoppingItem("Масло"),
-//        ShoppingItem("Олія"),
-//        ShoppingItem("Авокадо"),
-//        ShoppingItem("Ананас"),
-//        ShoppingItem("Масло"),
-//        ShoppingItem("Олія"),
-//        ShoppingItem("Авокадо"),
-//        ShoppingItem("Ананас"),
-//        ShoppingItem("Ананас"),
-//        ShoppingItem("Масло"),
-//        ShoppingItem("Олія"),
-//        ShoppingItem("Авокадо"),
-//        ShoppingItem("Ананас"),
-//    )
+    fun addItem(name: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val newItem = ShoppingItem(name = name)
+            dao.insertItem(newItem)
+            loadShoppingList()
+        }
+    }
 
     fun toggleBought(index: Int) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -203,6 +195,53 @@ class ShoppingListViewModelFactory(private val application: Application) :
     }
 }
 
+@Composable
+fun AddItemButton(addItem: (String) -> Unit = {}) {
+    var text by remember { mutableStateOf("") }
+
+    Column {
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            label = { Text("Add Item") }
+        )
+        Button(onClick = {
+            if (text.isNotEmpty()) {
+                addItem(text)
+                text = ""
+            }
+        }) {
+            Text("Add")
+        }
+    }
+}
+
+//interface ShoppingApi {
+//    @GET("items")
+//    suspend fun getItems(): List<ShoppingItem>
+//
+//    @POST("items")
+//    suspend fun addItem(@Body item: ShoppingItem)
+//
+//    @PUT("items/{id}")
+//    suspend fun updateItem(@Path("id") id: Int, @Body item: ShoppingItem)
+//
+//    @DELETE("items")
+//    suspend fun clearItems()
+//}
+//
+//object RetrofitInstance {
+//    private const val BASE_URL = "http://10.0.2.2:8080/"
+//
+//    val api: ShoppingApi by lazy {
+//        Retrofit.Builder()
+//            .baseUrl(BASE_URL)
+//            .addConverterFactory(GsonConverterFactory.create())
+//            .build()
+//            .create(ShoppingApi::class.java)
+//    }
+//}
+
 
 @Composable
 fun ShoppingListScreen(viewModel: ShoppingListViewModel = viewModel(
@@ -213,6 +252,9 @@ fun ShoppingListScreen(viewModel: ShoppingListViewModel = viewModel(
         modifier = Modifier.fillMaxSize()
             .padding(16.dp)
     ) {
+        item {
+            AddItemButton { viewModel.addItem(it) }
+        }
         itemsIndexed(viewModel.shoppingList) { ix, item ->
             ShoppingItemCard(item) {
                 viewModel.toggleBought(ix)
