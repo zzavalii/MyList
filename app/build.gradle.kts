@@ -61,4 +61,6 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+    implementation("com.google.accompanist:accompanist-swiperefresh:0.33.1-alpha")
+    implementation("androidx.compose.material:material:1.5.0") // или новее
 }

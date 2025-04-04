@@ -1,77 +1,32 @@
 package softserve.academy.mylist
 
 import android.app.Application
-import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.room.Dao
-import androidx.room.Database
-import androidx.room.Delete
-import androidx.room.Entity
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
-import androidx.room.PrimaryKey
-import androidx.room.Query
-import androidx.room.Room
-import androidx.room.RoomDatabase
-import androidx.room.Update
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.lifecycle.*
+import androidx.room.*
+import com.google.accompanist.swiperefresh.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import softserve.academy.mylist.ui.theme.MyListTheme
-
-class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        setContent {
-            MyListTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Surface(modifier = Modifier.padding(innerPadding)) {
-                        ShoppingListScreen()
-                    }
-                }
-            }
-        }
-    }
-}
-
-// Model View ViewModel
+import kotlinx.coroutines.withContext
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 @Entity(tableName = "shopping_items")
 data class ShoppingItem(
@@ -79,20 +34,20 @@ data class ShoppingItem(
     val isBought: Boolean = false,
     @PrimaryKey(autoGenerate = true) val id: Int = 0
 )
-// ORM
+
 @Dao
 interface ShoppingDao {
     @Query("SELECT * FROM shopping_items ORDER BY id DESC")
-    fun getAllItems(): List<ShoppingItem>
+    suspend fun getAllItems(): List<ShoppingItem>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    fun insertItem(item: ShoppingItem)
+    suspend fun insertItem(item: ShoppingItem)
 
     @Update
-    fun updateItem(item: ShoppingItem)
+    suspend fun updateItem(item: ShoppingItem)
 
     @Delete
-    fun deleteItem(item: ShoppingItem)
+    suspend fun deleteItem(item: ShoppingItem)
 }
 
 @Database(entities = [ShoppingItem::class], version = 1)
@@ -103,86 +58,74 @@ abstract class ShoppingDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: ShoppingDatabase? = null
 
-        fun getInstance(context: Context): ShoppingDatabase {
+        fun getInstance(context: android.content.Context): ShoppingDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
+                Room.databaseBuilder(
                     context.applicationContext,
                     ShoppingDatabase::class.java,
                     "shopping_db"
-                ).build()
-                INSTANCE = instance
-                instance
+                ).build().also { INSTANCE = it }
             }
         }
     }
 }
 
-
 class ShoppingListViewModel(application: Application) : AndroidViewModel(application) {
-    private val dao: ShoppingDao = ShoppingDatabase.getInstance(application).shoppingDao()
+    private val dao = ShoppingDatabase.getInstance(application).shoppingDao()
     private val _shoppingList = mutableStateListOf<ShoppingItem>()
     val shoppingList: List<ShoppingItem> get() = _shoppingList
 
+    var isRefreshing by mutableStateOf(false)
+        private set
+
     init {
-        loadShoppingList()
+        refreshList()
     }
 
-    private fun loadShoppingList() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val items = dao.getAllItems()
+    fun refreshList() {
+        viewModelScope.launch {
+            isRefreshing = true
+            val items = withContext(Dispatchers.IO) { dao.getAllItems() }
             _shoppingList.clear()
             _shoppingList.addAll(items)
+            isRefreshing = false
         }
     }
 
     fun addItem(name: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            val newItem = ShoppingItem(name = name)
-            dao.insertItem(newItem)
-            loadShoppingList()
+            dao.insertItem(ShoppingItem(name = name))
+            refreshList()
         }
     }
 
     fun toggleBought(index: Int) {
         viewModelScope.launch(Dispatchers.IO) {
             val item = _shoppingList[index]
-            val updatedItem = item.copy(isBought = !item.isBought)
-            dao.updateItem(updatedItem)
-            _shoppingList[index] = updatedItem
+            val updated = item.copy(isBought = !item.isBought)
+            dao.updateItem(updated)
+            withContext(Dispatchers.Main) {
+                _shoppingList[index] = updated
+            }
         }
     }
-}
 
-
-@Composable
-fun ShoppingItemCard(
-    item: ShoppingItem,
-    onToggleBought: () -> Unit = {}
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(8.dp)
-            .background(
-                Color.LightGray,
-//                MaterialTheme.colorScheme.surfaceDim,
-                MaterialTheme.shapes.large
-            )
-            .clickable { onToggleBought() }
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Checkbox(checked = item.isBought, onCheckedChange = {
-            onToggleBought()
-        })
-        Text(
-            text = item.name,
-            modifier = Modifier.weight(1f),
-            fontSize = 18.sp
-        )
+    fun deleteItem(item: ShoppingItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            dao.deleteItem(item)
+            refreshList()
+        }
     }
-}
 
+    fun updateItem(item: ShoppingItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            dao.updateItem(item)
+            refreshList()
+        }
+    }
+
+    fun getBoughtCount(): Int = shoppingList.count { it.isBought }
+}
 
 class ShoppingListViewModelFactory(private val application: Application) :
     ViewModelProvider.Factory {
@@ -195,88 +138,130 @@ class ShoppingListViewModelFactory(private val application: Application) :
     }
 }
 
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            val context = LocalContext.current.applicationContext as Application
+            val viewModel: ShoppingListViewModel = viewModel(
+                factory = ShoppingListViewModelFactory(context)
+            )
+            MyListApp(viewModel)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddItemButton(addItem: (String) -> Unit = {}) {
+fun MyListApp(viewModel: ShoppingListViewModel) {
+    val state = SwipeRefreshState(viewModel.isRefreshing)
+
+    Scaffold(
+        topBar = {
+            TopAppBar(title = {
+                Text("Список покупок (${viewModel.getBoughtCount()} куплено)")
+            })
+        }
+    ) { padding ->
+        SwipeRefresh(
+            state = state,
+            onRefresh = { viewModel.refreshList() },
+            modifier = Modifier.padding(padding)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp)
+            ) {
+                AddItemField { viewModel.addItem(it) }
+                Spacer(Modifier.height(8.dp))
+                LazyColumn {
+                    itemsIndexed(viewModel.shoppingList) { index, item ->
+                        ShoppingItemCard(
+                            item,
+                            onToggleBought = { viewModel.toggleBought(index) },
+                            onDelete = { viewModel.deleteItem(item) },
+                            onEdit = { newName ->
+                                viewModel.updateItem(item.copy(name = newName))
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AddItemField(onAdd: (String) -> Unit) {
     var text by remember { mutableStateOf("") }
 
-    Column {
+    Row {
         OutlinedTextField(
             value = text,
             onValueChange = { text = it },
-            label = { Text("Add Item") }
+            label = { Text("Новий товар") },
+            modifier = Modifier.weight(1f)
         )
+        Spacer(Modifier.width(8.dp))
         Button(onClick = {
-            if (text.isNotEmpty()) {
-                addItem(text)
+            if (text.isNotBlank()) {
+                onAdd(text)
                 text = ""
             }
         }) {
-            Text("Add")
+            Text("Додати")
         }
     }
 }
 
-//interface ShoppingApi {
-//    @GET("items")
-//    suspend fun getItems(): List<ShoppingItem>
-//
-//    @POST("items")
-//    suspend fun addItem(@Body item: ShoppingItem)
-//
-//    @PUT("items/{id}")
-//    suspend fun updateItem(@Path("id") id: Int, @Body item: ShoppingItem)
-//
-//    @DELETE("items")
-//    suspend fun clearItems()
-//}
-//
-//object RetrofitInstance {
-//    private const val BASE_URL = "http://10.0.2.2:8080/"
-//
-//    val api: ShoppingApi by lazy {
-//        Retrofit.Builder()
-//            .baseUrl(BASE_URL)
-//            .addConverterFactory(GsonConverterFactory.create())
-//            .build()
-//            .create(ShoppingApi::class.java)
-//    }
-//}
-
-
 @Composable
-fun ShoppingListScreen(viewModel: ShoppingListViewModel = viewModel(
-    factory = ShoppingListViewModelFactory(LocalContext.current
-        .applicationContext as Application)
-)) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize()
-            .padding(16.dp)
+fun ShoppingItemCard(
+    item: ShoppingItem,
+    onToggleBought: () -> Unit,
+    onDelete: () -> Unit,
+    onEdit: (String) -> Unit
+) {
+    var isEditing by remember { mutableStateOf(false) }
+    var editText by remember { mutableStateOf(TextFieldValue(item.name)) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        elevation = CardDefaults.cardElevation(4.dp)
     ) {
-        item {
-            AddItemButton { viewModel.addItem(it) }
-        }
-        itemsIndexed(viewModel.shoppingList) { ix, item ->
-            ShoppingItemCard(item) {
-                viewModel.toggleBought(ix)
+        Row(
+            modifier = Modifier
+                .padding(8.dp)
+                .background(if (item.isBought) Color(0xFFD0F0C0) else Color.White),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(
+                checked = item.isBought,
+                onCheckedChange = { onToggleBought() }
+            )
+            if (isEditing) {
+                OutlinedTextField(
+                    value = editText,
+                    onValueChange = { editText = it },
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = {
+                    isEditing = false
+                    if (editText.text.isNotBlank()) onEdit(editText.text)
+                }) {
+                    Icon(Icons.Default.Edit, contentDescription = "Зберегти")
+                }
+            } else {
+                Text(item.name, fontSize = 18.sp, modifier = Modifier.weight(1f))
+                IconButton(onClick = { isEditing = true }) {
+                    Icon(Icons.Default.Edit, contentDescription = "Редагувати")
+                }
+            }
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Default.Delete, contentDescription = "Видалити")
             }
         }
-    }
-}
-
-@Preview(showBackground = true, showSystemUi = true)
-@Composable
-fun ShoppingListScreenPreview() {
-    ShoppingListScreen()
-}
-
-
-//@Preview(showBackground = true)
-@Composable
-fun ShoppingItemCardPreview() {
-    var toggleState by remember { mutableStateOf(false) }
-    ShoppingItemCard(
-        ShoppingItem("Молоко", isBought = toggleState)
-    ) {
-        toggleState = !toggleState
     }
 }
